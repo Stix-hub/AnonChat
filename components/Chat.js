@@ -1,3 +1,4 @@
+// v2 - matchmaking corrigido
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
