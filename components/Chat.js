@@ -1,4 +1,3 @@
-// v2 - matchmaking corrigido
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
@@ -10,11 +9,10 @@ function isLink(text) {
 }
 
 export default function Chat({ userId }) {
-  const [screen, setScreen] = useState('connect') // connect | searching | chat
+  const [screen, setScreen] = useState('connect')
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [roomId, setRoomId] = useState(null)
-  const [onlineCount, setOnlineCount] = useState(247)
   const [strangerTyping, setStrangerTyping] = useState(false)
   const lastSentRef = useRef(0)
   const messagesEndRef = useRef(null)
@@ -24,13 +22,6 @@ export default function Chat({ userId }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setOnlineCount(c => c + Math.floor(Math.random() * 10) - 5)
-    }, 5000)
-    return () => clearInterval(interval)
-  }, [])
-
   function addSystem(text) {
     setMessages(m => [...m, { type: 'system', text }])
   }
@@ -39,11 +30,8 @@ export default function Chat({ userId }) {
     setScreen('searching')
     setMessages([])
 
-    // Inserir na fila
-    const { error: qErr } = await supabase.from('queue').insert({ id: userId })
-    if (qErr) console.error(qErr)
+    await supabase.from('queue').delete().eq('id', userId)
 
-    // Procurar outro usuário na fila
     const { data: others } = await supabase
       .from('queue')
       .select('id')
@@ -52,11 +40,8 @@ export default function Chat({ userId }) {
 
     if (others && others.length > 0) {
       const stranger = others[0]
+      await supabase.from('queue').delete().eq('id', stranger.id)
 
-      // Remover os dois da fila
-      await supabase.from('queue').delete().in('id', [userId, stranger.id])
-
-      // Criar sala
       const { data: room } = await supabase
         .from('rooms')
         .insert({ user1: userId, user2: stranger.id })
@@ -70,22 +55,23 @@ export default function Chat({ userId }) {
         subscribeToRoom(room.id)
       }
     } else {
-      // Ficar aguardando via realtime
+      await supabase.from('queue').insert({ id: userId })
+
       const sub = supabase
         .channel(`queue-watch-${userId}`)
         .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
           table: 'rooms',
-          filter: `user2=eq.${userId}`,
         }, async (payload) => {
           const room = payload.new
-          await supabase.from('queue').delete().eq('id', userId)
-          setRoomId(room.id)
-          setScreen('chat')
-          addSystem('você está conectado com um estranho.')
-          subscribeToRoom(room.id)
-          sub.unsubscribe()
+          if (room.user1 === userId || room.user2 === userId) {
+            setRoomId(room.id)
+            setScreen('chat')
+            addSystem('você está conectado com um estranho.')
+            subscribeToRoom(room.id)
+            sub.unsubscribe()
+          }
         })
         .subscribe()
 
@@ -181,10 +167,6 @@ export default function Chat({ userId }) {
 
       <header className="header">
         <div className="logo">chat<span>anon</span></div>
-        <div className="status-pill">
-          <div className="dot" />
-          <span>{Math.abs(onlineCount)} online</span>
-        </div>
       </header>
 
       {screen === 'connect' && (
@@ -192,11 +174,6 @@ export default function Chat({ userId }) {
           <div className="hero-title">fale com<br /><strong>estranhos.</strong></div>
           <div className="hero-sub">// anônimo. sem cadastro. sem rastro.</div>
           <button className="connect-btn" onClick={startSearch}>conectar agora</button>
-          <div className="rules">
-            <div className="rule-chip"><div className="rule-icon">!</div>sem links</div>
-            <div className="rule-chip"><div className="rule-icon">2s</div>entre mensagens</div>
-            <div className="rule-chip"><div className="rule-icon">100</div>caracteres max</div>
-          </div>
         </div>
       )}
 
